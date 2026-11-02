@@ -1,0 +1,106 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Deny all token permissions by default; each job grants only what it needs.
+permissions: {}
+
+# A new push to the same branch cancels the in-progress run for that branch.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Actions are pinned to full commit SHAs, never tags (tags are mutable).
+# Dependabot keeps the SHAs and the version comments up to date.
+jobs:
+  lint:
+    name: Lint and type-check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          version: "0.13.5"
+      - run: uv sync --locked
+      - run: uv run --locked ruff check --output-format=github
+      - run: uv run --locked ruff format --check
+      - run: uv run --locked mypy
+
+  test:
+    name: Test (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          version: "0.13.5"
+          python-version: ${{ matrix.python-version }}
+      - run: uv run --locked pytest
+
+  audit:
+    name: Dependency audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          version: "0.13.5"
+      # Audit the exact locked versions of every dependency, dev tooling included:
+      # a compromised linter runs in CI with the same access as our own code.
+      - run: uv export --locked --all-groups --no-emit-project --format requirements-txt -o requirements-audit.txt
+      - run: uv run --locked pip-audit --strict --disable-pip -r requirements-audit.txt
+
+  workflow-security:
+    name: Workflow security (zizmor)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          version: "0.13.5"
+      # Online audits (e.g. impostor-commit: a pinned SHA that actually lives in a fork)
+      # need API access; the job's read-only token is enough.
+      - run: uv run --locked zizmor --format=github .github
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  # Single stable check for branch protection, so changing the test matrix never
+  # requires changing repository settings.
+  ci-ok:
+    name: CI OK
+    if: always()
+    needs: [lint, test, audit, workflow-security]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Fail unless every required job succeeded
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped')
+        run: exit 1

@@ -1,0 +1,93 @@
+[project]
+name = "controlcheck"
+version = "0.1.0"
+description = "Verify that documented cloud security controls actually hold in a live AWS environment."
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "John Lewy" }]
+requires-python = ">=3.12"
+dependencies = []
+
+[project.scripts]
+controlcheck = "controlcheck.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.13.5,<0.14"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "mypy>=2.4.0",
+    "pip-audit>=2.10.1",
+    "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.17.2",
+    "zizmor>=1.31.1",
+]
+
+# ---------------------------------------------------------------------------
+# uv
+# ---------------------------------------------------------------------------
+[tool.uv]
+required-version = ">=0.13.5"
+# Supply-chain cooldown: never resolve a release published in the last 7 days.
+# Most malicious releases are detected and yanked within days of publication.
+exclude-newer = "7 days"
+
+# ---------------------------------------------------------------------------
+# Ruff: linting and formatting
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = [
+    "E", "W", "F", # pycodestyle and pyflakes: the baseline
+    "I",           # import sorting
+    "B",           # bugbear: likely bugs
+    "UP",          # pyupgrade: modern syntax for the supported Python versions
+    "S",           # flake8-bandit: security lints (replaces a separate Bandit run)
+    "BLE",         # no blind `except Exception`: a swallowed error must never become a PASS
+    "DTZ",         # no timezone-naive datetimes: key-age and report timestamps must be UTC-aware
+    "PTH",         # pathlib over os.path
+    "SIM", "C4",   # simplifications
+    "PT",          # pytest style
+    "RUF",         # ruff-specific checks
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"] # assert is how pytest works
+
+# ---------------------------------------------------------------------------
+# mypy
+# ---------------------------------------------------------------------------
+[tool.mypy]
+strict = true
+warn_unreachable = true
+files = ["src", "tests"]
+
+# ---------------------------------------------------------------------------
+# pytest and coverage
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+minversion = "9.0"
+testpaths = ["tests"]
+addopts = [
+    "--import-mode=importlib",
+    "--strict-markers",
+    "--strict-config",
+    "-ra",
+    "--cov",
+]
+xfail_strict = true
+filterwarnings = ["error"]
+
+[tool.coverage.run]
+source = ["controlcheck"]
+branch = true
+
+[tool.coverage.report]
+fail_under = 90
+show_missing = true
+exclude_also = ["if TYPE_CHECKING:"]
